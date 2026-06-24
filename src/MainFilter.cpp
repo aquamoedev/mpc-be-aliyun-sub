@@ -1,7 +1,7 @@
 #include "MainFilter.h"
 #include "PluginConfig.h"
 #include "ConfigDialog.h"
-#include <dvdmedia.h>
+#include <mmreg.h>
 
 // ============================================================
 // COM / DirectShow plumbing
