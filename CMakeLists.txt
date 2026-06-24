@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(CURL REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
-# ---- Compile definitions ----
+# ---- Compile definitions for the whole project ----
 add_compile_definitions(
     NOMINMAX
     WIN32_LEAN_AND_MEAN
@@ -16,14 +16,29 @@ add_compile_definitions(
 )
 
 # ---- DirectShow baseclasses (static lib) ----
+# Include all .cpp files except those using deprecated DirectDraw / unnecessary components
 add_library(strmbase STATIC
-    baseclasses/streams.h
-    baseclasses/wxdebug.h    baseclasses/wxdebug.cpp
-    baseclasses/wxutil.h     baseclasses/wxutil.cpp
-    baseclasses/msgthrd.h
-    baseclasses/combase.h    baseclasses/combase.cpp
-    baseclasses/amfilter.h   baseclasses/amfilter.cpp
-    baseclasses/transfrm.h   baseclasses/transfrm.cpp
+    # Core
+    baseclasses/combase.cpp
+    baseclasses/wxdebug.cpp
+    baseclasses/wxutil.cpp
+    baseclasses/wxlist.cpp
+    baseclasses/winutil.cpp
+    baseclasses/ctlutil.cpp
+    # Filter base
+    baseclasses/amfilter.cpp
+    baseclasses/transfrm.cpp
+    baseclasses/mtype.cpp
+    # Output
+    baseclasses/outputq.cpp
+    # COM / DLL
+    baseclasses/dllentry.cpp
+    baseclasses/dllsetup.cpp
+    baseclasses/pstream.cpp
+    # Clock
+    baseclasses/refclock.cpp
+    baseclasses/schedule.cpp
+    baseclasses/sysclock.cpp
 )
 target_include_directories(strmbase PUBLIC baseclasses)
 target_compile_definitions(strmbase PRIVATE
@@ -33,8 +48,10 @@ target_compile_definitions(strmbase PRIVATE
 )
 target_link_libraries(strmbase PUBLIC winmm strmiids msdmo)
 if(MSVC)
-    # suppress C4311 C4312 (pointer truncation) — legacy baseclass code
-    target_compile_options(strmbase PRIVATE /wd4311 /wd4312 /wd4996 /wd4459)
+    target_compile_options(strmbase PRIVATE
+        /wd4311 /wd4312 /wd4996 /wd4459 /wd4100 /wd4201
+        /wd4511 /wd4512 /wd4514 /wd4127 /wd4244
+    )
 endif()
 
 # ---- Plugin DLL ----
