@@ -8,34 +8,29 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(CURL REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
-# ---- Compile definitions for the whole project ----
+# ---- Global compile definitions (safe for everyone) ----
 add_compile_definitions(
-    NOMINMAX
     WIN32_LEAN_AND_MEAN
     _WIN32_WINNT=0x0601
 )
 
 # ---- DirectShow baseclasses (static lib) ----
-# Include all .cpp files except those using deprecated DirectDraw / unnecessary components
+# IMPORTANT: do NOT define NOMINMAX here — the legacy baseclass code uses
+# the min/max macros from <windows.h>
 add_library(strmbase STATIC
-    # Core
     baseclasses/combase.cpp
     baseclasses/wxdebug.cpp
     baseclasses/wxutil.cpp
     baseclasses/wxlist.cpp
     baseclasses/winutil.cpp
     baseclasses/ctlutil.cpp
-    # Filter base
     baseclasses/amfilter.cpp
     baseclasses/transfrm.cpp
     baseclasses/mtype.cpp
-    # Output
     baseclasses/outputq.cpp
-    # COM / DLL
     baseclasses/dllentry.cpp
     baseclasses/dllsetup.cpp
     baseclasses/pstream.cpp
-    # Clock
     baseclasses/refclock.cpp
     baseclasses/schedule.cpp
     baseclasses/sysclock.cpp
@@ -66,6 +61,7 @@ add_library(mpc-be-aliyun-sub SHARED
 target_include_directories(mpc-be-aliyun-sub PRIVATE src baseclasses)
 target_compile_definitions(mpc-be-aliyun-sub PRIVATE
     _CRT_SECURE_NO_WARNINGS
+    NOMINMAX   # only for OUR code — keeps std::min/max clean
 )
 target_link_libraries(mpc-be-aliyun-sub PRIVATE
     strmbase
