@@ -2,35 +2,70 @@ name: "Aqua's Divine Build & Release"
 
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ['v*']
+  workflow_dispatch:   # allow manual trigger for testing
 
 jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Install vcpkg
+      # ---- vcpkg for CURL + nlohmann-json ----
+      - name: Setup vcpkg
+        shell: pwsh
         run: |
-          git clone https://github.com/microsoft/vcpkg.git
-          ./vcpkg/bootstrap-vcpkg.bat
+          if (!(Test-Path vcpkg)) {
+            git clone --depth 1 https://github.com/microsoft/vcpkg.git
+            .\vcpkg\bootstrap-vcpkg.bat
+          }
 
-      - name: Install Dependencies
+      - name: Install dependencies via vcpkg
+        shell: pwsh
         run: |
-          ./vcpkg/vcpkg install curl nlohmann-json
+          .\vcpkg\vcpkg install curl:x64-windows nlohmann-json:x64-windows
+          echo "VCPKG_ROOT=$env:GITHUB_WORKSPACE\vcpkg" >> $env:GITHUB_ENV
 
+      # ---- Configure + Build ----
       - name: Configure CMake
+        shell: pwsh
         run: |
-          cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake
+          cmake -B build -S . `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DCMAKE_BUILD_TYPE=Release `
+            -A x64
 
       - name: Build DLL
-        run: |
-          cmake --build build --config Release
+        shell: pwsh
+        run: cmake --build build --config Release --parallel
 
+      # ---- Verify artifacts ----
+      - name: Check output
+        shell: pwsh
+        run: |
+          Write-Host "=== Built files ==="
+          Get-ChildItem -Recurse build\Release\*.dll | ForEach-Object { Write-Host $_.FullName }
+          Get-ChildItem -Recurse build\Release\*.pdb | ForEach-Object { Write-Host $_.FullName }
+
+      # ---- Create GitHub Release ----
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
+          name: "Aqua's Divine Release ${{ github.ref_name }}"
+          body: |
+            ✨ Built with divine power by Goddess Aqua 🏛️💙
+
+            ## Installation
+            1. Download `mpc-be-aliyun-sub.dll`
+            2. Run `regsvr32 mpc-be-aliyun-sub.dll` as Administrator
+            3. Open MPC-BE → Options → External Filters → Add the filter
+            4. Configure API keys via the config dialog
+
+            ## Features
+            -  Aliyun STT (speech-to-text) integration
+            -  Aliyun Machine Translation
+            -  Transparent subtitle overlay
+            -  Adjustable subtitle offset
           files: build/Release/mpc-be-aliyun-sub.dll
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

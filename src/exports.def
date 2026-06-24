@@ -1,0 +1,6 @@
+LIBRARY mpc-be-aliyun-sub
+EXPORTS
+    DllGetClassObject   PRIVATE
+    DllCanUnloadNow     PRIVATE
+    DllRegisterServer   PRIVATE
+    DllUnregisterServer PRIVATE
