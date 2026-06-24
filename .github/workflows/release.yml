@@ -1,0 +1,36 @@
+name: "Aqua's Divine Build & Release"
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git
+          ./vcpkg/bootstrap-vcpkg.bat
+
+      - name: Install Dependencies
+        run: |
+          ./vcpkg/vcpkg install curl nlohmann-json
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake
+
+      - name: Build DLL
+        run: |
+          cmake --build build --config Release
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: build/Release/mpc-be-aliyun-sub.dll
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
