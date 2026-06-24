@@ -87,20 +87,37 @@ HRESULT AudioSubFilter::GetMediaType(int iPosition, CMediaType* pMediaType) {
     return m_pInput->ConnectionMediaType(pMediaType);
 }
 
-// ------------ Transform: snapshot audio → queue → return immediately ------------
-HRESULT AudioSubFilter::Transform(IMediaSample* pSample) {
-    if (!pSample) return E_POINTER;
+// ------------ Transform: snapshot audio → queue, passthrough to output ------------
+HRESULT AudioSubFilter::Transform(IMediaSample* pIn, IMediaSample* pOut) {
+    if (!pIn || !pOut) return E_POINTER;
 
-    BYTE* pData = nullptr;
-    LONG  cbData = pSample->GetActualDataLength();
-    if (FAILED(pSample->GetPointer(&pData)) || !pData || cbData <= 0)
-        return S_FALSE;
+    // 1. Copy input to output (passthrough — must do this)
+    BYTE* pSrc = nullptr;
+    BYTE* pDst = nullptr;
+    LONG  cbData = pIn->GetActualDataLength();
+    HRESULT hr = pIn->GetPointer(&pSrc);
+    if (FAILED(hr) || !pSrc) return S_FALSE;
+    hr = pOut->GetPointer(&pDst);
+    if (FAILED(hr) || !pDst) return S_FALSE;
+    CopyMemory(pDst, pSrc, cbData);
+    pOut->SetActualDataLength(cbData);
 
-    std::lock_guard<std::mutex> lock(m_queueMtx);
-    if (m_audioQueue.size() < 50) {
-        m_audioQueue.push(std::vector<char>(pData, pData + cbData));
+    // Copy timestamps
+    REFERENCE_TIME tStart, tEnd;
+    if (SUCCEEDED(pIn->GetTime(&tStart, &tEnd)))
+        pOut->SetTime(&tStart, &tEnd);
+    pOut->SetSyncPoint(pIn->IsSyncPoint() == S_OK);
+    pOut->SetPreroll(pIn->IsPreroll() == S_OK);
+    pOut->SetDiscontinuity(pIn->IsDiscontinuity() == S_OK);
+
+    // 2. Snapshot audio data for async STT processing
+    {
+        std::lock_guard<std::mutex> lock(m_queueMtx);
+        if (m_audioQueue.size() < 50) {
+            m_audioQueue.push(std::vector<char>(pSrc, pSrc + cbData));
+        }
     }
-    return S_OK;   // passthrough — never block playback
+    return S_OK;
 }
 
 // ------------ Background worker ------------

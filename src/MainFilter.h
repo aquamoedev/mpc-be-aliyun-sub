@@ -1,5 +1,5 @@
 #pragma once
-#include "transfrm.h"
+#include "streams.h"
 #include "AliyunClient.h"
 #include "SubtitleOverlay.h"
 #include <queue>
@@ -14,27 +14,25 @@ DEFINE_GUID(CLSID_AudioSubFilter,
 
 class AudioSubFilter : public CTransformFilter {
 public:
-    // COM
     DECLARE_IUNKNOWN;
     static CUnknown* WINAPI CreateInstance(LPUNKNOWN pUnk, HRESULT* phr);
 
-    // CTransformFilter
-    HRESULT CheckInputType(const CMediaType* mtIn)  override;
+    // CTransformFilter overrides
+    HRESULT CheckInputType(const CMediaType* mtIn) override;
     HRESULT CheckTransform(const CMediaType* mtIn,
-                           const CMediaType* mtOut)  override;
-    HRESULT Transform(IMediaSample* pSample)          override;
+                           const CMediaType* mtOut) override;
+    HRESULT Transform(IMediaSample* pIn, IMediaSample* pOut) override;
     HRESULT DecideBufferSize(IMemAllocator* pAlloc,
                              ALLOCATOR_PROPERTIES* pprops) override;
     HRESULT GetMediaType(int iPosition, CMediaType* pMediaType) override;
 
-    // Config
     void ShowConfig(HINSTANCE hInst, HWND hParent);
 
 private:
     AudioSubFilter(LPUNKNOWN pUnk, HRESULT* phr);
     ~AudioSubFilter();
 
-    void ProcessingThread();   // background API + overlay loop
+    void ProcessingThread();
 
     std::queue<std::vector<char>> m_audioQueue;
     std::mutex                    m_queueMtx;
