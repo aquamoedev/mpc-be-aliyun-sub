@@ -2,7 +2,6 @@
 #include "MainFilter.h"
 #include "PluginConfig.h"
 #include "ConfigDialog.h"
-#include "cprop.h"
 #include <mmreg.h>
 
 // ============================================================
@@ -49,32 +48,70 @@ const AMOVIESETUP_FILTER sudFilter = {
 };
 
 // ============================================================
-// Property page –  pops up the config dialog when the user
-// double-clicks the filter in MPC-BE
+// Minimal IPropertyPage —  shows our config dialog on Activate
 // ============================================================
 
-class AudioSubPropPage : public CBasePropertyPage {
+class AudioSubPropPage : public IPropertyPage {
+    volatile LONG m_cRef = 1;
+    IUnknown*     m_pFilter = nullptr;
+
 public:
     static CUnknown* WINAPI CreateInstance(LPUNKNOWN pUnk, HRESULT* phr) {
-        AudioSubPropPage* p = new AudioSubPropPage(pUnk, phr);
-        if (p == nullptr && phr) *phr = E_OUTOFMEMORY;
-        return p;
+        auto* p = new AudioSubPropPage();
+        if (!p) { if (phr) *phr = E_OUTOFMEMORY; return nullptr; }
+        (void)pUnk; (void)phr;
+        return reinterpret_cast<CUnknown*>(p);
     }
 
-    AudioSubPropPage(LPUNKNOWN pUnk, HRESULT* phr)
-        : CBasePropertyPage(NAME("Aqua Audio Sub PropPage"), pUnk, 0, 0)
-    {
-        (void)phr;
-    }
-
-    // When the property page is activated, show our config dialog
-    HRESULT OnActivate() override {
-        HWND hParent = m_hwnd;
-        HINSTANCE hInst = reinterpret_cast<HINSTANCE>(
-            GetWindowLongPtr(hParent, GWLP_HINSTANCE));
-        ShowConfigDialog(hInst, hParent);
+    // ---- IUnknown ----
+    STDMETHODIMP QueryInterface(REFIID riid, void** ppv) override {
+        if (!ppv) return E_POINTER;
+        if (riid == IID_IUnknown || riid == IID_IPropertyPage)
+            *ppv = static_cast<IPropertyPage*>(this);
+        else { *ppv = nullptr; return E_NOINTERFACE; }
+        AddRef();
         return S_OK;
     }
+    STDMETHODIMP_(ULONG) AddRef() override {
+        return InterlockedIncrement(&m_cRef);
+    }
+    STDMETHODIMP_(ULONG) Release() override {
+        ULONG c = InterlockedDecrement(&m_cRef);
+        if (c == 0) delete this;
+        return c;
+    }
+
+    // ---- IPropertyPage ----
+    STDMETHODIMP SetPageSite(IPropertyPageSite*) override { return S_OK; }
+    STDMETHODIMP SetObjects(ULONG c, IUnknown** pp) override {
+        if (c >= 1 && pp[0]) m_pFilter = pp[0];
+        return S_OK;
+    }
+    STDMETHODIMP Activate(HWND hParent, LPCRECT, BOOL) override {
+        ShowConfigDialog(
+            reinterpret_cast<HINSTANCE>(GetWindowLongPtr(hParent, GWLP_HINSTANCE)),
+            hParent);
+        return S_OK;
+    }
+    STDMETHODIMP Deactivate() override { return S_OK; }
+    STDMETHODIMP Show(UINT) override { return S_OK; }
+    STDMETHODIMP Move(LPCRECT) override { return S_OK; }
+    STDMETHODIMP GetPageInfo(LPPROPPAGEINFO pInfo) override {
+        if (!pInfo) return E_POINTER;
+        static const WCHAR title[] = L"Aqua Audio Sub Settings";
+        pInfo->size.cx = 0;
+        pInfo->size.cy = 0;
+        pInfo->pszTitle = static_cast<LPOLESTR>(CoTaskMemAlloc(sizeof(title)));
+        if (pInfo->pszTitle) memcpy(pInfo->pszTitle, title, sizeof(title));
+        pInfo->pszDocString = nullptr;
+        pInfo->pszHelpFile  = nullptr;
+        pInfo->dwHelpContext = 0;
+        return S_OK;
+    }
+    STDMETHODIMP Apply() override { return S_OK; }
+    STDMETHODIMP Help(LPCWSTR) override { return E_NOTIMPL; }
+    STDMETHODIMP TranslateAccelerator(LPMSG) override { return E_NOTIMPL; }
+    STDMETHODIMP IsPageDirty() override { return S_FALSE; }
 };
 
 // ============================================================
