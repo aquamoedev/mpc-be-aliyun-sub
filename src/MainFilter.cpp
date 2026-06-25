@@ -52,8 +52,14 @@ const AMOVIESETUP_FILTER sudFilter = {
 // ============================================================
 
 CFactoryTemplate g_Templates[] = {
-    { L"Aqua Audio Sub Filter", &CLSID_AudioSubFilter,
-      AudioSubFilter::CreateInstance, nullptr, &sudFilter };
+    {
+        L"Aqua Audio Sub Filter",
+        &CLSID_AudioSubFilter,
+        AudioSubFilter::CreateInstance,
+        nullptr,
+        &sudFilter
+    }
+};
 int g_cTemplates = sizeof(g_Templates) / sizeof(g_Templates[0]);
 
 STDAPI DllRegisterServer()   { return AMovieDllRegisterServer2(TRUE); }
