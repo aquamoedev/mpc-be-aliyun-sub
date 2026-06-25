@@ -1,7 +1,8 @@
 #pragma once
+#include <windows.h>
+#include <mmreg.h>
 #include <vector>
 #include <string>
-#include <mmreg.h>
 
 // AliyunClient encapsulates both STT (speech-to-text) and translation
 // via OpenAI-compatible API endpoints (works with Qwen ASR, Qwen LLM,
