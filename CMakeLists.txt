@@ -36,6 +36,7 @@ add_library(strmbase STATIC
     baseclasses/refclock.cpp
     baseclasses/schedule.cpp
     baseclasses/sysclock.cpp
+    baseclasses/cprop.cpp
 )
 target_include_directories(strmbase PUBLIC baseclasses)
 target_compile_definitions(strmbase PRIVATE

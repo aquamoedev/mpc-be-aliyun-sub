@@ -8,11 +8,18 @@
 #include <vector>
 #include <atomic>
 
-// {B8F4E2D1-7A3C-4F91-A6E5-9D2C0F8B3A71}
+// Filter CLSID: {B8F4E2D1-7A3C-4F91-A6E5-9D2C0F8B3A71}
 DEFINE_GUID(CLSID_AudioSubFilter,
     0xb8f4e2d1, 0x7a3c, 0x4f91, 0xa6, 0xe5, 0x9d, 0x2c, 0x0f, 0x8b, 0x3a, 0x71);
 
-class AudioSubFilter : public CTransformFilter {
+// Property page CLSID: {D5A1C3E7-8F2B-4B6D-9C1A-3E5F7A2D8B4C}
+DEFINE_GUID(CLSID_AudioSubPropPage,
+    0xd5a1c3e7, 0x8f2b, 0x4b6d, 0x9c, 0x1a, 0x3e, 0x5f, 0x7a, 0x2d, 0x8b, 0x4c);
+
+// Forward declaration
+class AudioSubPropPage;
+
+class AudioSubFilter : public CTransformFilter, public ISpecifyPropertyPages {
 public:
     DECLARE_IUNKNOWN;
     static CUnknown* WINAPI CreateInstance(LPUNKNOWN pUnk, HRESULT* phr);
@@ -26,7 +33,13 @@ public:
                              ALLOCATOR_PROPERTIES* pprops) override;
     HRESULT GetMediaType(int iPosition, CMediaType* pMediaType) override;
 
+    // ISpecifyPropertyPages
+    STDMETHODIMP GetPages(CAUUID* pPages) override;
+
     void ShowConfig(HINSTANCE hInst, HWND hParent);
+
+    // Override NonDelegatingQueryInterface to expose ISpecifyPropertyPages
+    STDMETHODIMP NonDelegatingQueryInterface(REFIID riid, void** ppv) override;
 
 private:
     AudioSubFilter(LPUNKNOWN pUnk, HRESULT* phr);

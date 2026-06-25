@@ -2,6 +2,7 @@
 #include "MainFilter.h"
 #include "PluginConfig.h"
 #include "ConfigDialog.h"
+#include "cprop.h"
 #include <mmreg.h>
 
 // ============================================================
@@ -48,16 +49,52 @@ const AMOVIESETUP_FILTER sudFilter = {
 };
 
 // ============================================================
+// Property page –  pops up the config dialog when the user
+// double-clicks the filter in MPC-BE
+// ============================================================
+
+class AudioSubPropPage : public CBasePropertyPage {
+public:
+    static CUnknown* WINAPI CreateInstance(LPUNKNOWN pUnk, HRESULT* phr) {
+        AudioSubPropPage* p = new AudioSubPropPage(pUnk, phr);
+        if (p == nullptr && phr) *phr = E_OUTOFMEMORY;
+        return p;
+    }
+
+    AudioSubPropPage(LPUNKNOWN pUnk, HRESULT* phr)
+        : CBasePropertyPage(NAME("Aqua Audio Sub PropPage"), pUnk, 0, 0)
+    {
+        (void)phr;
+    }
+
+    // When the property page is activated, show our config dialog
+    HRESULT OnActivate() override {
+        HWND hParent = m_hwnd;
+        HINSTANCE hInst = reinterpret_cast<HINSTANCE>(
+            GetWindowLongPtr(hParent, GWLP_HINSTANCE));
+        ShowConfigDialog(hInst, hParent);
+        return S_OK;
+    }
+};
+
+// ============================================================
 // COM / DirectShow plumbing
 // ============================================================
 
 CFactoryTemplate g_Templates[] = {
-    {
+    {   // Filter
         L"Aqua Audio Sub Filter",
         &CLSID_AudioSubFilter,
         AudioSubFilter::CreateInstance,
         nullptr,
         &sudFilter
+    },
+    {   // Property page
+        L"Aqua Audio Sub PropPage",
+        &CLSID_AudioSubPropPage,
+        AudioSubPropPage::CreateInstance,
+        nullptr,
+        nullptr
     }
 };
 int g_cTemplates = sizeof(g_Templates) / sizeof(g_Templates[0]);
@@ -93,7 +130,28 @@ AudioSubFilter::~AudioSubFilter() {
     if (m_worker.joinable()) m_worker.join();
 }
 
-// ------------ CheckInputType: accept any standard audio ------------
+// ---- ISpecifyPropertyPages ----
+
+STDMETHODIMP AudioSubFilter::GetPages(CAUUID* pPages) {
+    if (!pPages) return E_POINTER;
+    pPages->cElems = 1;
+    pPages->pElems = static_cast<GUID*>(CoTaskMemAlloc(sizeof(GUID)));
+    if (!pPages->pElems) return E_OUTOFMEMORY;
+    *pPages->pElems = CLSID_AudioSubPropPage;
+    return S_OK;
+}
+
+// ---- NonDelegatingQueryInterface: expose ISpecifyPropertyPages ----
+
+STDMETHODIMP AudioSubFilter::NonDelegatingQueryInterface(REFIID riid, void** ppv) {
+    if (riid == IID_ISpecifyPropertyPages) {
+        return GetInterface(static_cast<ISpecifyPropertyPages*>(this), ppv);
+    }
+    return CTransformFilter::NonDelegatingQueryInterface(riid, ppv);
+}
+
+// ---- Filter overrides ----
+
 HRESULT AudioSubFilter::CheckInputType(const CMediaType* mtIn) {
     if (!mtIn) return E_POINTER;
     if (mtIn->majortype == MEDIATYPE_Audio &&
@@ -103,7 +161,6 @@ HRESULT AudioSubFilter::CheckInputType(const CMediaType* mtIn) {
     return VFW_E_TYPE_NOT_ACCEPTED;
 }
 
-// ------------ CheckTransform: audio in → audio out (passthrough) ------------
 HRESULT AudioSubFilter::CheckTransform(const CMediaType* mtIn,
                                        const CMediaType* mtOut) {
     if (!mtIn || !mtOut) return E_POINTER;
@@ -113,7 +170,6 @@ HRESULT AudioSubFilter::CheckTransform(const CMediaType* mtIn,
     return VFW_E_TYPE_NOT_ACCEPTED;
 }
 
-// ------------ DecideBufferSize: minimal 1-second buffer ------------
 HRESULT AudioSubFilter::DecideBufferSize(IMemAllocator* pAlloc,
                                          ALLOCATOR_PROPERTIES* pprops) {
     if (!pAlloc || !pprops || !m_pInput || !m_pInput->IsConnected())
@@ -129,18 +185,15 @@ HRESULT AudioSubFilter::DecideBufferSize(IMemAllocator* pAlloc,
     return pAlloc->SetProperties(pprops, &actual);
 }
 
-// ------------ GetMediaType: pass through the input type ------------
 HRESULT AudioSubFilter::GetMediaType(int iPosition, CMediaType* pMediaType) {
     if (iPosition != 0) return VFW_S_NO_MORE_ITEMS;
     if (!m_pInput || !m_pInput->IsConnected()) return E_UNEXPECTED;
     return m_pInput->ConnectionMediaType(pMediaType);
 }
 
-// ------------ Transform: snapshot audio → queue, passthrough to output ------------
 HRESULT AudioSubFilter::Transform(IMediaSample* pIn, IMediaSample* pOut) {
     if (!pIn || !pOut) return E_POINTER;
 
-    // 1. Copy input to output (passthrough — must do this)
     BYTE* pSrc = nullptr;
     BYTE* pDst = nullptr;
     LONG  cbData = pIn->GetActualDataLength();
@@ -151,7 +204,6 @@ HRESULT AudioSubFilter::Transform(IMediaSample* pIn, IMediaSample* pOut) {
     CopyMemory(pDst, pSrc, cbData);
     pOut->SetActualDataLength(cbData);
 
-    // Copy timestamps
     REFERENCE_TIME tStart, tEnd;
     if (SUCCEEDED(pIn->GetTime(&tStart, &tEnd)))
         pOut->SetTime(&tStart, &tEnd);
@@ -159,7 +211,6 @@ HRESULT AudioSubFilter::Transform(IMediaSample* pIn, IMediaSample* pOut) {
     pOut->SetPreroll(pIn->IsPreroll() == S_OK);
     pOut->SetDiscontinuity(pIn->IsDiscontinuity() == S_OK);
 
-    // 2. Snapshot audio data for async STT processing
     {
         std::lock_guard<std::mutex> lock(m_queueMtx);
         if (m_audioQueue.size() < 50) {
@@ -169,7 +220,6 @@ HRESULT AudioSubFilter::Transform(IMediaSample* pIn, IMediaSample* pOut) {
     return S_OK;
 }
 
-// ------------ Background worker ------------
 void AudioSubFilter::ProcessingThread() {
     while (m_running) {
         std::vector<char> chunk;
