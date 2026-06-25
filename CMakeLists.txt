@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ---- Dependencies ----
+# Static linking: CURL_STATICLIB tells curl headers we're linking statically
+set(CURL_STATICLIB ON)
 find_package(CURL REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
@@ -63,13 +65,16 @@ add_library(mpc-be-aliyun-sub SHARED
 target_include_directories(mpc-be-aliyun-sub PRIVATE src baseclasses)
 target_compile_definitions(mpc-be-aliyun-sub PRIVATE
     _CRT_SECURE_NO_WARNINGS
-    NOMINMAX   # only for OUR code — keeps std::min/max clean
+    CURL_STATICLIB   # curl headers need this for static linking
+    NOMINMAX         # only for OUR code — keeps std::min/max clean
 )
 target_link_libraries(mpc-be-aliyun-sub PRIVATE
     strmbase
     CURL::libcurl
     nlohmann_json::nlohmann_json
     strmiids quartz ole32 oleaut32 winmm
+    # Windows system libs required by static curl
+    wldap32 crypt32 advapi32 normaliz
 )
 if(MSVC)
     target_link_options(mpc-be-aliyun-sub PRIVATE

@@ -26,7 +26,7 @@ jobs:
       - name: Install dependencies via vcpkg
         shell: pwsh
         run: |
-          .\vcpkg\vcpkg install curl:x64-windows nlohmann-json:x64-windows
+          .\vcpkg\vcpkg install curl:x64-windows-static-md nlohmann-json:x64-windows-static-md
           echo "VCPKG_ROOT=$env:GITHUB_WORKSPACE\vcpkg" >> $env:GITHUB_ENV
 
       # ---- Configure + Build ----
@@ -35,6 +35,7 @@ jobs:
         run: |
           cmake -B build -S . `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static-md `
             -DCMAKE_BUILD_TYPE=Release `
             -A x64
 
