@@ -5,13 +5,55 @@
 #include <mmreg.h>
 
 // ============================================================
+// DirectShow filter registration data
+// ============================================================
+
+// Accept any audio type (PCM/Wave)
+const AMOVIESETUP_MEDIATYPE sudAudioType = {
+    &MEDIATYPE_Audio,
+    &MEDIASUBTYPE_NULL
+};
+
+const AMOVIESETUP_PIN sudPins[] = {
+    {
+        L"Input",             // pin name
+        FALSE,                // rendered
+        FALSE,                // output
+        FALSE,                // zero instances
+        FALSE,                // multiple instances
+        &CLSID_NULL,          // connects to filter (any)
+        nullptr,              // connects to pin (any)
+        1,                    // number of media types
+        &sudAudioType         // media types
+    },
+    {
+        L"Output",
+        FALSE,                // rendered
+        TRUE,                 // IS output
+        FALSE,
+        FALSE,
+        &CLSID_NULL,
+        nullptr,
+        1,
+        &sudAudioType
+    }
+};
+
+const AMOVIESETUP_FILTER sudFilter = {
+    &CLSID_AudioSubFilter,        // CLSID
+    L"Aqua Audio Sub Filter",     // friendly name
+    MERIT_DO_NOT_USE + 1,         // merit: won't auto-insert, but visible in list
+    2,                            // number of pins
+    sudPins                       // pin descriptors
+};
+
+// ============================================================
 // COM / DirectShow plumbing
 // ============================================================
 
 CFactoryTemplate g_Templates[] = {
     { L"Aqua Audio Sub Filter", &CLSID_AudioSubFilter,
-      AudioSubFilter::CreateInstance, nullptr, nullptr }
-};
+      AudioSubFilter::CreateInstance, nullptr, &sudFilter };
 int g_cTemplates = sizeof(g_Templates) / sizeof(g_Templates[0]);
 
 STDAPI DllRegisterServer()   { return AMovieDllRegisterServer2(TRUE); }
