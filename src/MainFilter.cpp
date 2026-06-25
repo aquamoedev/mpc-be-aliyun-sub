@@ -163,6 +163,7 @@ AudioSubFilter::AudioSubFilter(LPUNKNOWN pUnk, HRESULT* phr)
 {
     (void)phr;
     m_overlay.Init();
+    m_overlay.ShowWelcome();
     m_worker = std::thread(&AudioSubFilter::ProcessingThread, this);
 }
 

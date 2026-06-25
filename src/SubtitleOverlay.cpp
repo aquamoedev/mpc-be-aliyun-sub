@@ -15,6 +15,30 @@ static std::wstring Utf8ToWide(const std::string& utf8) {
 }
 
 // ============================================================
+// DrawText helper —  shadow + colored text, bottom-center
+// ============================================================
+static void DrawSubtitle(HDC hdc, RECT& rect, const std::wstring& text,
+                         HFONT hFont, HFONT hFontShadow, COLORREF color) {
+    RECT textRect = rect;
+    textRect.top    = rect.bottom - 160;
+    textRect.bottom = rect.bottom - 30;
+
+    // Shadow
+    RECT shadowRect = textRect;
+    OffsetRect(&shadowRect, 2, 2);
+    SelectObject(hdc, hFontShadow);
+    SetTextColor(hdc, RGB(0, 0, 0));
+    DrawTextW(hdc, text.c_str(), -1, &shadowRect,
+              DT_CENTER | DT_VCENTER | DT_NOCLIP | DT_WORDBREAK);
+
+    // Main text
+    SelectObject(hdc, hFont);
+    SetTextColor(hdc, color);
+    DrawTextW(hdc, text.c_str(), -1, &textRect,
+              DT_CENTER | DT_VCENTER | DT_NOCLIP | DT_WORDBREAK);
+}
+
+// ============================================================
 // Init  –  create a fullscreen, topmost, transparent overlay
 // ============================================================
 void SubtitleOverlay::Init() {
@@ -47,15 +71,20 @@ void SubtitleOverlay::Init() {
         42, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Microsoft YaHei");
-
-    m_hFontSmall = CreateFontW(
-        28, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Microsoft YaHei");
 }
 
 // ============================================================
-// UpdateText  –  draw translated subtitle or error on the overlay
+// ShowWelcome  –  display welcome message on startup
+// ============================================================
+void SubtitleOverlay::ShowWelcome() {
+    if (!m_hwnd || !m_hFont) return;
+
+    // Use UpdateText to draw; it handles the full paint cycle
+    UpdateText("Aqua's Divine Subtitle Plugin is ready!");
+}
+
+// ============================================================
+// UpdateText  –  draw subtitle or error on the overlay
 // ============================================================
 void SubtitleOverlay::UpdateText(const std::string& utf8Text) {
     if (!m_hwnd || !m_hFont) return;
@@ -70,42 +99,14 @@ void SubtitleOverlay::UpdateText(const std::string& utf8Text) {
     RECT rect;
     GetClientRect(m_hwnd, &rect);
 
+    // Fill with black (transparent via color key)
     HBRUSH hBlack = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
     FillRect(hdc, &rect, hBlack);
 
     SetBkMode(hdc, TRANSPARENT);
 
-    if (isError) {
-        // Error text: red, smaller, top-right area
-        RECT errRect = rect;
-        errRect.left   = rect.right  - 700;
-        errRect.top    = 30;
-        errRect.bottom = 200;
-
-        SelectObject(hdc, m_hFontSmall);
-        SetTextColor(hdc, RGB(255, 80, 80));
-        DrawTextW(hdc, wide.c_str(), -1, &errRect,
-                  DT_RIGHT | DT_TOP | DT_NOCLIP | DT_WORDBREAK);
-    } else {
-        // Normal subtitle: yellow, bottom-center, with shadow
-        RECT textRect = rect;
-        textRect.top    = rect.bottom - 200;
-        textRect.bottom = rect.bottom - 40;
-
-        // Shadow
-        RECT shadowRect = textRect;
-        OffsetRect(&shadowRect, 2, 2);
-        SelectObject(hdc, m_hFontShadow);
-        SetTextColor(hdc, RGB(0, 0, 0));
-        DrawTextW(hdc, wide.c_str(), -1, &shadowRect,
-                  DT_CENTER | DT_VCENTER | DT_NOCLIP | DT_SINGLELINE);
-
-        // Main text
-        SelectObject(hdc, m_hFont);
-        SetTextColor(hdc, RGB(255, 255, 0));
-        DrawTextW(hdc, wide.c_str(), -1, &textRect,
-                  DT_CENTER | DT_VCENTER | DT_NOCLIP | DT_SINGLELINE);
-    }
+    COLORREF color = isError ? RGB(255, 80, 80) : RGB(255, 255, 0);
+    DrawSubtitle(hdc, rect, wide, m_hFont, m_hFontShadow, color);
 
     ReleaseDC(m_hwnd, hdc);
 }
@@ -116,6 +117,5 @@ void SubtitleOverlay::UpdateText(const std::string& utf8Text) {
 SubtitleOverlay::~SubtitleOverlay() {
     if (m_hFont)        DeleteObject(m_hFont);
     if (m_hFontShadow)  DeleteObject(m_hFontShadow);
-    if (m_hFontSmall)   DeleteObject(m_hFontSmall);
     if (m_hwnd)         DestroyWindow(m_hwnd);
 }

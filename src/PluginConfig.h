@@ -20,7 +20,7 @@ public:
     // ---- STT / ASR (OpenAI-compatible) ----
     std::string sttApiBase   = "https://dashscope.aliyuncs.com/compatible-mode/v1";
     std::string sttApiKey    = "";
-    std::string sttModel     = "qwen-asr-v1";
+    std::string sttModel     = "qwen3-asr-flash-realtime";
 
     // ---- Translation LLM (OpenAI-compatible Chat Completions) ----
     std::string translateApiBase = "https://dashscope.aliyuncs.com/compatible-mode/v1";

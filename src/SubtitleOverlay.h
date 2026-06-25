@@ -5,6 +5,7 @@
 class SubtitleOverlay {
 public:
     void Init();
+    void ShowWelcome();
     void UpdateText(const std::string& utf8Text);
     ~SubtitleOverlay();
 
