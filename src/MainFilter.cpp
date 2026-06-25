@@ -8,10 +8,10 @@
 // DirectShow filter registration data
 // ============================================================
 
-// Accept any audio type (PCM/Wave)
+// Accept any audio type
 const AMOVIESETUP_MEDIATYPE sudAudioType = {
     &MEDIATYPE_Audio,
-    &MEDIASUBTYPE_NULL
+    nullptr             // any audio subtype
 };
 
 const AMOVIESETUP_PIN sudPins[] = {
@@ -21,8 +21,8 @@ const AMOVIESETUP_PIN sudPins[] = {
         FALSE,                // output
         FALSE,                // zero instances
         FALSE,                // multiple instances
-        &CLSID_NULL,          // connects to filter (any)
-        nullptr,              // connects to pin (any)
+        nullptr,              // connects to any filter
+        nullptr,              // connects to any pin
         1,                    // number of media types
         &sudAudioType         // media types
     },
@@ -32,7 +32,7 @@ const AMOVIESETUP_PIN sudPins[] = {
         TRUE,                 // IS output
         FALSE,
         FALSE,
-        &CLSID_NULL,
+        nullptr,
         nullptr,
         1,
         &sudAudioType
