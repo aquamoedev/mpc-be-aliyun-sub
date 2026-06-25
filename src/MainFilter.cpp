@@ -4,6 +4,10 @@
 #include "ConfigDialog.h"
 #include <mmreg.h>
 
+// DLL's own module handle — saved during DllMain so we can load
+// resources (dialog template, etc.) from the correct module.
+static HINSTANCE g_hDllInst = nullptr;
+
 // ============================================================
 // DirectShow filter registration data
 // ============================================================
@@ -88,9 +92,7 @@ public:
         return S_OK;
     }
     STDMETHODIMP Activate(HWND hParent, LPCRECT, BOOL) override {
-        ShowConfigDialog(
-            reinterpret_cast<HINSTANCE>(GetWindowLongPtr(hParent, GWLP_HINSTANCE)),
-            hParent);
+        ShowConfigDialog(g_hDllInst, hParent);
         return S_OK;
     }
     STDMETHODIMP Deactivate() override { return S_OK; }
@@ -141,6 +143,8 @@ STDAPI DllUnregisterServer() { return AMovieDllRegisterServer2(FALSE); }
 
 extern "C" BOOL WINAPI DllEntryPoint(HINSTANCE, ULONG, LPVOID);
 BOOL WINAPI DllMain(HINSTANCE hDll, DWORD dwReason, LPVOID lpReserved) {
+    if (dwReason == DLL_PROCESS_ATTACH)
+        g_hDllInst = hDll;
     return DllEntryPoint(reinterpret_cast<HINSTANCE>(hDll), dwReason, lpReserved);
 }
 
