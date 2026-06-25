@@ -56,6 +56,8 @@ add_library(mpc-be-aliyun-sub SHARED
     src/SubtitleOverlay.h  src/SubtitleOverlay.cpp
     src/ConfigDialog.h    src/ConfigDialog.cpp
     src/MainFilter.h      src/MainFilter.cpp
+    src/resource.h
+    src/resource.rc
     src/exports.def
 )
 target_include_directories(mpc-be-aliyun-sub PRIVATE src baseclasses)
