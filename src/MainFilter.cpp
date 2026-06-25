@@ -1,3 +1,4 @@
+#include <initguid.h>
 #include "MainFilter.h"
 #include "PluginConfig.h"
 #include "ConfigDialog.h"
