@@ -101,8 +101,8 @@ public:
     STDMETHODIMP GetPageInfo(LPPROPPAGEINFO pInfo) override {
         if (!pInfo) return E_POINTER;
         static const WCHAR title[] = L"Aqua Audio Sub Settings";
-        pInfo->size.cx = 0;
-        pInfo->size.cy = 0;
+        pInfo->size.cx = 520;
+        pInfo->size.cy = 480;
         pInfo->pszTitle = static_cast<LPOLESTR>(CoTaskMemAlloc(sizeof(title)));
         if (pInfo->pszTitle) memcpy(pInfo->pszTitle, title, sizeof(title));
         pInfo->pszDocString = nullptr;

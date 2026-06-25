@@ -5,9 +5,11 @@
 class SubtitleOverlay {
 public:
     void Init();
-    void UpdateText(const std::string& text);
+    void UpdateText(const std::string& utf8Text);
+    ~SubtitleOverlay();
 
 private:
-    HWND hwnd   = nullptr;
-    HFONT hFont = nullptr;
+    HWND  m_hwnd  = nullptr;
+    HFONT m_hFont = nullptr;
+    HFONT m_hFontShadow = nullptr;
 };
