@@ -2,6 +2,14 @@
 #include <string>
 #include <atomic>
 
+// ============================================================
+// PluginConfig — singleton with Windows Registry persistence
+// ============================================================
+// All settings are saved to HKCU\Software\AquaSubFilter and
+// loaded automatically on first access.  Changes made through
+// the config dialog are persisted immediately on OK.
+// ============================================================
+
 class PluginConfig {
 public:
     static PluginConfig& Instance() {
@@ -30,6 +38,13 @@ public:
     int         offsetMs   = 0;
     bool        isEnabled  = true;
 
+    // ---- Persistence ----
+    void SaveToRegistry();
+    void LoadFromRegistry();
+
 private:
-    PluginConfig() = default;
+    PluginConfig();
+    ~PluginConfig() = default;
+    PluginConfig(const PluginConfig&) = delete;
+    PluginConfig& operator=(const PluginConfig&) = delete;
 };

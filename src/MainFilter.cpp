@@ -197,8 +197,15 @@ HRESULT AudioSubFilter::CheckInputType(const CMediaType* mtIn) {
     if (!mtIn) return E_POINTER;
     if (mtIn->majortype == MEDIATYPE_Audio &&
         (mtIn->subtype   == MEDIASUBTYPE_PCM ||
-         mtIn->formattype == FORMAT_WaveFormatEx))
+         mtIn->formattype == FORMAT_WaveFormatEx)) {
+        // Capture audio format for WAV header generation
+        if (mtIn->pbFormat && mtIn->cbFormat >= sizeof(WAVEFORMATEX)) {
+            std::lock_guard<std::mutex> lock(m_wfexMtx);
+            memcpy(&m_wfex, mtIn->pbFormat, sizeof(WAVEFORMATEX));
+            m_wfexValid = true;
+        }
         return S_OK;
+    }
     return VFW_E_TYPE_NOT_ACCEPTED;
 }
 
@@ -261,21 +268,52 @@ HRESULT AudioSubFilter::Transform(IMediaSample* pIn, IMediaSample* pOut) {
     return S_OK;
 }
 
+HRESULT AudioSubFilter::StartStreaming() {
+    // Re-capture WAVEFORMATEX from the now-connected input pin
+    if (m_pInput && m_pInput->IsConnected()) {
+        CMediaType mt;
+        if (SUCCEEDED(m_pInput->ConnectionMediaType(&mt)) &&
+            mt.pbFormat && mt.cbFormat >= sizeof(WAVEFORMATEX)) {
+            std::lock_guard<std::mutex> lock(m_wfexMtx);
+            memcpy(&m_wfex, mt.pbFormat, sizeof(WAVEFORMATEX));
+            m_wfexValid = true;
+        }
+    }
+    return CTransformFilter::StartStreaming();
+}
+
 void AudioSubFilter::ProcessingThread() {
+    // Accumulate ~3 seconds of audio before sending
+    DWORD bytesPerSec = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_wfexMtx);
+        if (m_wfexValid) bytesPerSec = m_wfex.nAvgBytesPerSec;
+    }
+    if (bytesPerSec == 0) bytesPerSec = 176400; // fallback: 44100×16×2
+
+    const DWORD targetBytes = bytesPerSec * 3; // 3 seconds
+    std::vector<char> accumulator;
+    accumulator.reserve(targetBytes);
+
     while (m_running) {
-        std::vector<char> chunk;
+        // Drain the queue into accumulator
         {
             std::lock_guard<std::mutex> lock(m_queueMtx);
-            if (!m_audioQueue.empty()) {
-                chunk = std::move(m_audioQueue.front());
+            while (!m_audioQueue.empty()) {
+                auto& chunk = m_audioQueue.front();
+                accumulator.insert(accumulator.end(), chunk.begin(), chunk.end());
                 m_audioQueue.pop();
             }
         }
-        if (!chunk.empty()) {
-            std::string result = m_client.ProcessAudioChunk(chunk);
+
+        // If we have enough audio, send it
+        if (accumulator.size() >= targetBytes) {
+            std::string result = m_client.ProcessAudioChunk(accumulator, m_wfex, m_wfexValid);
             m_overlay.UpdateText(result);
+            accumulator.clear();
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(80));
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
 }
 

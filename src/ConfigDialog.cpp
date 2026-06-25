@@ -74,6 +74,8 @@ static INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
             cfg.offsetMs   = GetDlgItemInt(hDlg, IDC_OFFSET_MS, nullptr, TRUE);
             cfg.isEnabled  = (IsDlgButtonChecked(hDlg, IDC_ENABLED) == BST_CHECKED);
 
+            cfg.SaveToRegistry();  // persist to HKCU\Software\AquaSubFilter
+
             EndDialog(hDlg, IDOK);
             return TRUE;
         }

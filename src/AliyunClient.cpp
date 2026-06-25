@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 #include <string>
 #include <cstring>
+#include <sstream>
 
 using json = nlohmann::json;
 
@@ -17,13 +18,53 @@ static size_t WriteCallback(void* contents, size_t size, size_t nmemb, std::stri
     return totalSize;
 }
 
-static size_t ReadCallback(void* ptr, size_t size, size_t nmemb, void* userdata) {
-    auto* src = static_cast<std::string*>(userdata);
-    if (src->empty()) return 0;
-    size_t toCopy = (std::min)(size * nmemb, src->size());
-    std::memcpy(ptr, src->data(), toCopy);
-    src->erase(0, toCopy);
-    return toCopy;
+// ============================================================
+// BuildWavBlob  —  prepend a standard 44-byte WAV header
+// ============================================================
+
+std::vector<char> AliyunClient::BuildWavBlob(
+    const std::vector<char>& rawPcm,
+    const WAVEFORMATEX& wfex,
+    bool wfexValid)
+{
+    // Extract format parameters
+    WORD  channels   = wfexValid ? wfex.nChannels      : 2;
+    DWORD sampleRate = wfexValid ? wfex.nSamplesPerSec  : 44100;
+    WORD  bits       = wfexValid ? wfex.wBitsPerSample  : 16;
+    DWORD byteRate   = sampleRate * channels * (bits / 8);
+    WORD  blockAlign = channels * (bits / 8);
+
+    DWORD dataSize = static_cast<DWORD>(rawPcm.size());
+    DWORD riffSize = 36 + dataSize;
+
+    std::vector<char> wav(44 + dataSize);
+    char* p = wav.data();
+
+    // RIFF header
+    memcpy(p,     "RIFF", 4);  p += 4;
+    memcpy(p, &riffSize, 4);  p += 4;
+    memcpy(p,     "WAVE", 4);  p += 4;
+
+    // fmt  subchunk
+    memcpy(p,     "fmt ", 4);  p += 4;
+    DWORD fmtSize = 16;
+    memcpy(p, &fmtSize,    4);  p += 4;
+    WORD fmtTag = 1; // PCM
+    memcpy(p, &fmtTag,     2);  p += 2;
+    memcpy(p, &channels,   2);  p += 2;
+    memcpy(p, &sampleRate, 4);  p += 4;
+    memcpy(p, &byteRate,   4);  p += 4;
+    memcpy(p, &blockAlign, 2);  p += 2;
+    memcpy(p, &bits,       2);  p += 2;
+
+    // data subchunk
+    memcpy(p, "data", 4);  p += 4;
+    memcpy(p, &dataSize, 4);  p += 4;
+
+    // PCM payload
+    memcpy(p, rawPcm.data(), dataSize);
+
+    return wav;
 }
 
 // ============================================================
@@ -59,30 +100,29 @@ std::string AliyunClient::HttpPostJson(
 }
 
 // ============================================================
-// SpeechToText  –  multipart/form-data  POST
+// SpeechToText  –  multipart/form-data  POST with WAV blob
 // ============================================================
 
-std::string AliyunClient::SpeechToText(const std::vector<char>& data) {
+std::string AliyunClient::SpeechToText(const std::vector<char>& wavData) {
     auto& cfg = PluginConfig::Instance();
 
-    std::string url = cfg.sttApiBase + "/audio/transcriptions";
-    if (cfg.sttApiBase.back() == '/')
-        url = cfg.sttApiBase + "audio/transcriptions";
+    std::string url = cfg.sttApiBase;
+    if (!url.empty() && url.back() != '/') url += '/';
+    url += "audio/transcriptions";
 
     CURL* curl = curl_easy_init();
-    if (!curl) return "";
+    if (!curl) return "[ERR: curl init failed]";
 
     std::string response;
 
-    // Build multipart form
     curl_mime* form = curl_mime_init(curl);
 
-    // --- field: file (the raw PCM audio as a blob) ---
+    // --- field: file (WAV) ---
     curl_mimepart* filePart = curl_mime_addpart(form);
     curl_mime_name(filePart, "file");
-    curl_mime_filename(filePart, "audio.pcm");
-    curl_mime_data(filePart, data.data(), data.size());
-    curl_mime_type(filePart, "application/octet-stream");
+    curl_mime_filename(filePart, "audio.wav");
+    curl_mime_data(filePart, wavData.data(), wavData.size());
+    curl_mime_type(filePart, "audio/wav");
 
     // --- field: model ---
     curl_mimepart* modelPart = curl_mime_addpart(form);
@@ -106,16 +146,24 @@ std::string AliyunClient::SpeechToText(const std::vector<char>& data) {
     curl_mime_free(form);
     curl_easy_cleanup(curl);
 
-    if (res != CURLE_OK || response.empty()) return "";
+    if (res != CURLE_OK)
+        return "[ERR: STT network error]";
+    if (response.empty())
+        return "[ERR: STT empty response]";
 
-    // Parse OpenAI / Qwen ASR response: { "text": "..." }
     try {
         json j = json::parse(response);
+        if (j.contains("error")) {
+            std::string msg = j["error"].is_object()
+                ? j["error"]["message"].get<std::string>()
+                : j["error"].get<std::string>();
+            return "[ERR: STT API] " + msg;
+        }
         if (j.contains("text"))
             return j["text"].get<std::string>();
     } catch (...) {}
 
-    return "";
+    return "[ERR: STT parse failed] " + response.substr(0, 120);
 }
 
 // ============================================================
@@ -125,11 +173,10 @@ std::string AliyunClient::SpeechToText(const std::vector<char>& data) {
 std::string AliyunClient::TranslateText(const std::string& text) {
     auto& cfg = PluginConfig::Instance();
 
-    std::string url = cfg.translateApiBase + "/chat/completions";
-    if (cfg.translateApiBase.back() == '/')
-        url = cfg.translateApiBase + "chat/completions";
+    std::string url = cfg.translateApiBase;
+    if (!url.empty() && url.back() != '/') url += '/';
+    url += "chat/completions";
 
-    // Build system prompt (replace ${TARGET_LANG} placeholder)
     std::string sysPrompt = cfg.translateSystemPrompt;
     auto pos = sysPrompt.find("${TARGET_LANG}");
     if (pos != std::string::npos)
@@ -145,23 +192,40 @@ std::string AliyunClient::TranslateText(const std::string& text) {
     body["max_tokens"]  = 512;
 
     std::string raw = HttpPostJson(url, cfg.translateApiKey, body.dump());
-    if (raw.empty()) return "";
+    if (raw.empty()) return "[ERR: Translate network error]";
 
-    // Parse: { "choices": [ { "message": { "content": "..." } } ] }
     try {
         json j = json::parse(raw);
+        if (j.contains("error")) {
+            std::string msg = j["error"].is_object()
+                ? j["error"]["message"].get<std::string>()
+                : j["error"].get<std::string>();
+            return "[ERR: Translate API] " + msg;
+        }
         return j["choices"][0]["message"]["content"].get<std::string>();
     } catch (...) {}
 
-    return "";
+    return "[ERR: Translate parse failed]";
 }
 
 // ============================================================
-// ProcessAudioChunk  –  pipeline
+// ProcessAudioChunk  –  pipeline entry point
 // ============================================================
 
-std::string AliyunClient::ProcessAudioChunk(const std::vector<char>& audioData) {
-    std::string text = SpeechToText(audioData);
+std::string AliyunClient::ProcessAudioChunk(
+    const std::vector<char>& rawPcm,
+    const WAVEFORMATEX& wfex,
+    bool wfexValid)
+{
+    auto& cfg = PluginConfig::Instance();
+    if (!cfg.isEnabled) return "";
+
+    // Build WAV blob from raw PCM
+    std::vector<char> wav = BuildWavBlob(rawPcm, wfex, wfexValid);
+
+    std::string text = SpeechToText(wav);
     if (text.empty()) return "";
+    if (text.find("[ERR:") == 0) return text; // pass through error
+
     return TranslateText(text);
 }
