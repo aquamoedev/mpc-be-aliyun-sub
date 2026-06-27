@@ -92,14 +92,13 @@ public:
         return S_OK;
     }
     STDMETHODIMP Activate(HWND hParent, LPCRECT, BOOL) override {
-        // Show our modal config dialog (blocks until user closes it)
+        // Show modal config dialog
         ShowConfigDialog(g_hDllInst, hParent);
-        // Close the property sheet frame to prevent residual window
-        // PSM_PRESSBUTTON (WM_USER+112) with PSBTN_OK (1)
+        // Close the property sheet frame (works for both
+        // PropertySheet() and OleCreatePropertyFrame())
         HWND hRoot = GetAncestor(hParent, GA_ROOT);
-        if (hRoot) {
-            PostMessage(hRoot, WM_USER + 112, 1, 0);
-        }
+        if (hRoot && hRoot != hParent)
+            EndDialog(hRoot, IDOK);
         return S_OK;
     }
     STDMETHODIMP Deactivate() override { return S_OK; }
@@ -150,8 +149,10 @@ STDAPI DllUnregisterServer() { return AMovieDllRegisterServer2(FALSE); }
 
 extern "C" BOOL WINAPI DllEntryPoint(HINSTANCE, ULONG, LPVOID);
 BOOL WINAPI DllMain(HINSTANCE hDll, DWORD dwReason, LPVOID lpReserved) {
-    if (dwReason == DLL_PROCESS_ATTACH)
+    if (dwReason == DLL_PROCESS_ATTACH) {
         g_hDllInst = hDll;
+        SubtitleOverlay::SetDllInstance(hDll);
+    }
     return DllEntryPoint(reinterpret_cast<HINSTANCE>(hDll), dwReason, lpReserved);
 }
 
