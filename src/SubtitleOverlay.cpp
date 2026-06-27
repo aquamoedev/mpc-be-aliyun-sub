@@ -10,109 +10,81 @@ static std::wstring Utf8ToWide(const std::string& utf8) {
     if (len <= 0) return L"";
     std::wstring wide(len, L'\0');
     MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, &wide[0], len);
-    wide.resize(len - 1);
+    if (!wide.empty() && wide.back() == L'\0') wide.pop_back();
     return wide;
 }
 
 // ============================================================
-// DrawText helper — shadow + colored text, bottom-center
-// ============================================================
-static void DrawSubtitle(HDC hdc, RECT& rect, const std::wstring& text,
-                         HFONT hFont, HFONT hFontShadow, COLORREF color) {
-    RECT textRect = rect;
-    textRect.top    = rect.bottom - 160;
-    textRect.bottom = rect.bottom - 30;
-
-    // Shadow
-    RECT shadowRect = textRect;
-    OffsetRect(&shadowRect, 2, 2);
-    SelectObject(hdc, hFontShadow);
-    SetTextColor(hdc, RGB(0, 0, 0));
-    DrawTextW(hdc, text.c_str(), -1, &shadowRect,
-              DT_CENTER | DT_VCENTER | DT_NOCLIP | DT_WORDBREAK);
-
-    // Main text
-    SelectObject(hdc, hFont);
-    SetTextColor(hdc, color);
-    DrawTextW(hdc, text.c_str(), -1, &textRect,
-              DT_CENTER | DT_VCENTER | DT_NOCLIP | DT_WORDBREAK);
-}
-
-// ============================================================
-// WndProc — handles WM_PAINT to persist subtitle text
+// WndProc — runs on overlay thread
 // ============================================================
 LRESULT CALLBACK SubtitleOverlay::WndProc(HWND hwnd, UINT msg,
                                           WPARAM wParam, LPARAM lParam) {
-    // Retrieve 'this' from GWLP_USERDATA
     SubtitleOverlay* self = reinterpret_cast<SubtitleOverlay*>(
         GetWindowLongPtrW(hwnd, GWLP_USERDATA));
 
     switch (msg) {
-    case WM_PAINT: {
-        if (self) {
-            PAINTSTRUCT ps;
-            HDC hdc = BeginPaint(hwnd, &ps);
-            self->Paint(hdc);
-            EndPaint(hwnd, &ps);
-            return 0;
+    case WM_AQUA_UPDATE_SUBTITLE: {
+        // Receive text from processing thread (allocated on heap)
+        std::string* pText = reinterpret_cast<std::string*>(lParam);
+        if (pText && self) {
+            self->m_currentText = *pText;
+            self->m_isError = (pText->find("[ERR:") == 0);
+            delete pText;
+            self->RedrawOverlay();
+        } else {
+            delete pText;
         }
-        break;
+        return 0;
     }
-    case WM_ERASEBKGND:
-        // Prevent flicker — we fill in WM_PAINT
-        return 1;
+    case WM_AQUA_SHUTDOWN:
+        DestroyWindow(hwnd);
+        return 0;
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        return 0;
     }
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
 // ============================================================
-// Paint — called from WM_PAINT handler
+// CreateOverlayWindow — called from overlay thread
 // ============================================================
-void SubtitleOverlay::Paint(HDC hdc) {
-    RECT rect;
-    GetClientRect(m_hwnd, &rect);
-
-    // Fill with black (transparent via color key)
-    HBRUSH hBlack = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
-    FillRect(hdc, &rect, hBlack);
-
-    if (m_currentText.empty() || !m_hFont) return;
-
-    std::wstring wide = Utf8ToWide(m_currentText);
-    if (wide.empty()) return;
-
-    SetBkMode(hdc, TRANSPARENT);
-    COLORREF color = m_isError ? RGB(255, 80, 80) : RGB(255, 255, 0);
-    DrawSubtitle(hdc, rect, wide, m_hFont, m_hFontShadow, color);
-}
-
-// ============================================================
-// Init — create a fullscreen, topmost, transparent overlay
-// ============================================================
-void SubtitleOverlay::Init() {
+void SubtitleOverlay::CreateOverlayWindow() {
     HINSTANCE hInst = GetModuleHandle(nullptr);
 
     WNDCLASSW wc = {};
     wc.lpfnWndProc   = WndProc;
-    wc.hInstance     = hInst;
-    wc.lpszClassName = L"AquaSubOverlay";
+    wc.hInstance      = hInst;
+    wc.lpszClassName  = L"AquaSubOverlay";
     RegisterClassW(&wc);
+
+    m_screenW  = GetSystemMetrics(SM_CXSCREEN);
+    int screenH = GetSystemMetrics(SM_CYSCREEN);
 
     m_hwnd = CreateWindowExW(
         WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE,
         L"AquaSubOverlay", L"Aqua Subtitles",
         WS_POPUP,
-        0, 0,
-        GetSystemMetrics(SM_CXSCREEN),
-        GetSystemMetrics(SM_CYSCREEN),
+        0, screenH - m_overlayH,   // bottom of screen
+        m_screenW, m_overlayH,
         nullptr, nullptr, hInst, nullptr);
 
-    // Store 'this' for WndProc access
+    if (!m_hwnd) return;
+
     SetWindowLongPtrW(m_hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
 
-    SetLayeredWindowAttributes(m_hwnd, RGB(0, 0, 0), 0, LWA_COLORKEY);
-    ShowWindow(m_hwnd, SW_SHOW);
+    // Create memory DC and bitmap for UpdateLayeredWindow
+    HDC hdcScreen = GetDC(NULL);
+    m_hdcMem = CreateCompatibleDC(hdcScreen);
+    m_hbm = CreateCompatibleBitmap(hdcScreen, m_screenW, m_overlayH);
+    SelectObject(m_hdcMem, m_hbm);
+    ReleaseDC(NULL, hdcScreen);
 
+    // Fill with black (will be transparent via color key)
+    RECT rc = {0, 0, m_screenW, m_overlayH};
+    FillRect(m_hdcMem, &rc, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+
+    // Create fonts
     m_hFont = CreateFontW(
         42, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
@@ -122,35 +94,128 @@ void SubtitleOverlay::Init() {
         42, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Microsoft YaHei");
+
+    // Initial UpdateLayeredWindow to make window visible (all transparent)
+    RedrawOverlay();
+
+    ShowWindow(m_hwnd, SW_SHOW);
 }
 
 // ============================================================
-// ShowWelcome — display welcome message on startup
+// RedrawOverlay — draw text on memory DC, push via UpdateLayeredWindow
+// ============================================================
+void SubtitleOverlay::RedrawOverlay() {
+    if (!m_hdcMem || !m_hbm || !m_hwnd) return;
+
+    // Clear bitmap with black (transparent via color key)
+    RECT rc = {0, 0, m_screenW, m_overlayH};
+    FillRect(m_hdcMem, &rc, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+
+    if (!m_currentText.empty() && m_hFont) {
+        std::wstring wide = Utf8ToWide(m_currentText);
+        if (!wide.empty()) {
+            SetBkMode(m_hdcMem, TRANSPARENT);
+
+            // Text area with padding
+            RECT textRect = {20, 20, m_screenW - 20, m_overlayH - 20};
+
+            // Shadow
+            RECT shadowRect = textRect;
+            OffsetRect(&shadowRect, 2, 2);
+            SelectObject(m_hdcMem, m_hFontShadow);
+            SetTextColor(m_hdcMem, RGB(0, 0, 0));
+            DrawTextW(m_hdcMem, wide.c_str(), -1, &shadowRect,
+                      DT_CENTER | DT_VCENTER | DT_NOCLIP | DT_WORDBREAK);
+
+            // Main text
+            COLORREF color = m_isError ? RGB(255, 80, 80) : RGB(255, 255, 0);
+            SelectObject(m_hdcMem, m_hFont);
+            SetTextColor(m_hdcMem, color);
+            DrawTextW(m_hdcMem, wide.c_str(), -1, &textRect,
+                      DT_CENTER | DT_VCENTER | DT_NOCLIP | DT_WORDBREAK);
+        }
+    }
+
+    // Push to screen via UpdateLayeredWindow
+    HDC hdcScreen = GetDC(NULL);
+    POINT ptDst = {0, GetSystemMetrics(SM_CYSCREEN) - m_overlayH};
+    SIZE sz = {m_screenW, m_overlayH};
+    POINT ptSrc = {0, 0};
+    UpdateLayeredWindow(m_hwnd, hdcScreen, &ptDst, &sz, m_hdcMem, &ptSrc,
+                        RGB(0, 0, 0), NULL, ULW_COLORKEY);
+    ReleaseDC(NULL, hdcScreen);
+}
+
+// ============================================================
+// ThreadProc — overlay thread entry point
+// ============================================================
+void SubtitleOverlay::ThreadProc() {
+    CreateOverlayWindow();
+    if (!m_hwnd) return;
+
+    m_ready = true;  // Signal window is ready
+
+    // Message pump
+    MSG msg;
+    while (GetMessage(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+
+    CleanupResources();
+}
+
+// ============================================================
+// CleanupResources — called when message pump exits
+// ============================================================
+void SubtitleOverlay::CleanupResources() {
+    if (m_hFont)       { DeleteObject(m_hFont);       m_hFont = nullptr; }
+    if (m_hFontShadow) { DeleteObject(m_hFontShadow); m_hFontShadow = nullptr; }
+    if (m_hbm)         { DeleteObject(m_hbm);         m_hbm = nullptr; }
+    if (m_hdcMem)      { DeleteDC(m_hdcMem);          m_hdcMem = nullptr; }
+    m_hwnd = nullptr;
+}
+
+// ============================================================
+// Init — create overlay thread, wait for window
+// ============================================================
+void SubtitleOverlay::Init() {
+    m_thread = std::thread(&SubtitleOverlay::ThreadProc, this);
+    // Wait for window to be created (timeout: 2 seconds)
+    for (int i = 0; i < 200 && !m_ready; i++) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+}
+
+// ============================================================
+// ShowWelcome — post welcome message
 // ============================================================
 void SubtitleOverlay::ShowWelcome() {
-    if (!m_hwnd || !m_hFont) return;
     UpdateText("Aqua's Divine Subtitle Plugin is ready!");
 }
 
 // ============================================================
-// UpdateText — store subtitle and trigger repaint
+// UpdateText — post text to overlay thread
 // ============================================================
 void SubtitleOverlay::UpdateText(const std::string& utf8Text) {
-    if (!m_hwnd || !m_hFont) return;
+    if (!m_ready || !m_hwnd) return;
     if (utf8Text.empty()) return;
 
-    m_currentText = utf8Text;
-    m_isError = (utf8Text.find("[ERR:") == 0);
-
-    // Trigger WM_PAINT
-    InvalidateRect(m_hwnd, nullptr, TRUE);
+    // Allocate string on heap for cross-thread transfer
+    std::string* pText = new std::string(utf8Text);
+    if (!PostMessage(m_hwnd, WM_AQUA_UPDATE_SUBTITLE, 0, reinterpret_cast<LPARAM>(pText))) {
+        delete pText;  // PostMessage failed, clean up
+    }
 }
 
 // ============================================================
-// Destructor
+// Destructor — shutdown overlay thread
 // ============================================================
 SubtitleOverlay::~SubtitleOverlay() {
-    if (m_hFont)        DeleteObject(m_hFont);
-    if (m_hFontShadow)  DeleteObject(m_hFontShadow);
-    if (m_hwnd)         DestroyWindow(m_hwnd);
+    if (m_ready && m_hwnd) {
+        PostMessage(m_hwnd, WM_AQUA_SHUTDOWN, 0, 0);
+    }
+    if (m_thread.joinable()) {
+        m_thread.join();
+    }
 }

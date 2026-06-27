@@ -58,7 +58,6 @@ const AMOVIESETUP_FILTER sudFilter = {
 class AudioSubPropPage : public IPropertyPage {
     volatile LONG m_cRef = 1;
     IUnknown*     m_pFilter = nullptr;
-    HWND          m_hPage   = nullptr;   // modeless child dialog
 
 public:
     static CUnknown* WINAPI CreateInstance(LPUNKNOWN pUnk, HRESULT* phr) {
@@ -93,28 +92,19 @@ public:
         return S_OK;
     }
     STDMETHODIMP Activate(HWND hParent, LPCRECT, BOOL) override {
-        // Create modeless child dialog inside the property-sheet frame
-        m_hPage = CreateConfigPage(g_hDllInst, hParent);
-        return m_hPage ? S_OK : E_FAIL;
-    }
-    STDMETHODIMP Deactivate() override {
-        if (m_hPage) {
-            DestroyConfigPage(m_hPage);
-            m_hPage = nullptr;
+        // Show our modal config dialog (blocks until user closes it)
+        ShowConfigDialog(g_hDllInst, hParent);
+        // Close the property sheet frame to prevent residual window
+        // PSM_PRESSBUTTON (WM_USER+112) with PSBTN_OK (1)
+        HWND hRoot = GetAncestor(hParent, GA_ROOT);
+        if (hRoot) {
+            PostMessage(hRoot, WM_USER + 112, 1, 0);
         }
         return S_OK;
     }
-    STDMETHODIMP Show(UINT nCmdShow) override {
-        if (m_hPage) ShowWindow(m_hPage, nCmdShow ? SW_SHOW : SW_HIDE);
-        return S_OK;
-    }
-    STDMETHODIMP Move(LPCRECT pRect) override {
-        if (m_hPage && pRect)
-            MoveWindow(m_hPage, pRect->left, pRect->top,
-                       pRect->right - pRect->left,
-                       pRect->bottom - pRect->top, TRUE);
-        return S_OK;
-    }
+    STDMETHODIMP Deactivate() override { return S_OK; }
+    STDMETHODIMP Show(UINT) override { return S_OK; }
+    STDMETHODIMP Move(LPCRECT) override { return S_OK; }
     STDMETHODIMP GetPageInfo(LPPROPPAGEINFO pInfo) override {
         if (!pInfo) return E_POINTER;
         static const WCHAR title[] = L"Aqua Audio Sub Settings";
