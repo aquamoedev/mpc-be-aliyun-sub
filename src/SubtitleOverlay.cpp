@@ -15,7 +15,7 @@ static std::wstring Utf8ToWide(const std::string& utf8) {
 }
 
 // ============================================================
-// DrawText helper —  shadow + colored text, bottom-center
+// DrawText helper — shadow + colored text, bottom-center
 // ============================================================
 static void DrawSubtitle(HDC hdc, RECT& rect, const std::wstring& text,
                          HFONT hFont, HFONT hFontShadow, COLORREF color) {
@@ -39,13 +39,61 @@ static void DrawSubtitle(HDC hdc, RECT& rect, const std::wstring& text,
 }
 
 // ============================================================
-// Init  –  create a fullscreen, topmost, transparent overlay
+// WndProc — handles WM_PAINT to persist subtitle text
+// ============================================================
+LRESULT CALLBACK SubtitleOverlay::WndProc(HWND hwnd, UINT msg,
+                                          WPARAM wParam, LPARAM lParam) {
+    // Retrieve 'this' from GWLP_USERDATA
+    SubtitleOverlay* self = reinterpret_cast<SubtitleOverlay*>(
+        GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+
+    switch (msg) {
+    case WM_PAINT: {
+        if (self) {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd, &ps);
+            self->Paint(hdc);
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+        break;
+    }
+    case WM_ERASEBKGND:
+        // Prevent flicker — we fill in WM_PAINT
+        return 1;
+    }
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+// ============================================================
+// Paint — called from WM_PAINT handler
+// ============================================================
+void SubtitleOverlay::Paint(HDC hdc) {
+    RECT rect;
+    GetClientRect(m_hwnd, &rect);
+
+    // Fill with black (transparent via color key)
+    HBRUSH hBlack = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
+    FillRect(hdc, &rect, hBlack);
+
+    if (m_currentText.empty() || !m_hFont) return;
+
+    std::wstring wide = Utf8ToWide(m_currentText);
+    if (wide.empty()) return;
+
+    SetBkMode(hdc, TRANSPARENT);
+    COLORREF color = m_isError ? RGB(255, 80, 80) : RGB(255, 255, 0);
+    DrawSubtitle(hdc, rect, wide, m_hFont, m_hFontShadow, color);
+}
+
+// ============================================================
+// Init — create a fullscreen, topmost, transparent overlay
 // ============================================================
 void SubtitleOverlay::Init() {
     HINSTANCE hInst = GetModuleHandle(nullptr);
 
     WNDCLASSW wc = {};
-    wc.lpfnWndProc   = DefWindowProcW;
+    wc.lpfnWndProc   = WndProc;
     wc.hInstance     = hInst;
     wc.lpszClassName = L"AquaSubOverlay";
     RegisterClassW(&wc);
@@ -58,6 +106,9 @@ void SubtitleOverlay::Init() {
         GetSystemMetrics(SM_CXSCREEN),
         GetSystemMetrics(SM_CYSCREEN),
         nullptr, nullptr, hInst, nullptr);
+
+    // Store 'this' for WndProc access
+    SetWindowLongPtrW(m_hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
 
     SetLayeredWindowAttributes(m_hwnd, RGB(0, 0, 0), 0, LWA_COLORKEY);
     ShowWindow(m_hwnd, SW_SHOW);
@@ -74,41 +125,25 @@ void SubtitleOverlay::Init() {
 }
 
 // ============================================================
-// ShowWelcome  –  display welcome message on startup
+// ShowWelcome — display welcome message on startup
 // ============================================================
 void SubtitleOverlay::ShowWelcome() {
     if (!m_hwnd || !m_hFont) return;
-
-    // Use UpdateText to draw; it handles the full paint cycle
     UpdateText("Aqua's Divine Subtitle Plugin is ready!");
 }
 
 // ============================================================
-// UpdateText  –  draw subtitle or error on the overlay
+// UpdateText — store subtitle and trigger repaint
 // ============================================================
 void SubtitleOverlay::UpdateText(const std::string& utf8Text) {
     if (!m_hwnd || !m_hFont) return;
     if (utf8Text.empty()) return;
 
-    std::wstring wide = Utf8ToWide(utf8Text);
-    if (wide.empty()) return;
+    m_currentText = utf8Text;
+    m_isError = (utf8Text.find("[ERR:") == 0);
 
-    bool isError = (utf8Text.find("[ERR:") == 0);
-
-    HDC hdc = GetDC(m_hwnd);
-    RECT rect;
-    GetClientRect(m_hwnd, &rect);
-
-    // Fill with black (transparent via color key)
-    HBRUSH hBlack = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
-    FillRect(hdc, &rect, hBlack);
-
-    SetBkMode(hdc, TRANSPARENT);
-
-    COLORREF color = isError ? RGB(255, 80, 80) : RGB(255, 255, 0);
-    DrawSubtitle(hdc, rect, wide, m_hFont, m_hFontShadow, color);
-
-    ReleaseDC(m_hwnd, hdc);
+    // Trigger WM_PAINT
+    InvalidateRect(m_hwnd, nullptr, TRUE);
 }
 
 // ============================================================
