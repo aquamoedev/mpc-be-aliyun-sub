@@ -1,5 +1,6 @@
 #include "ConfigDialog.h"
 #include "PluginConfig.h"
+#include "SubtitleOverlay.h"
 #include "resource.h"
 #include <windows.h>
 #include <string>
@@ -68,5 +69,7 @@ static INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 } // namespace
 
 void ShowConfigDialog(HINSTANCE hInst, HWND hParent) {
-    DialogBox(hInst, MAKEINTRESOURCE(IDD_CONFIG), hParent, DlgProc);
+    SubtitleOverlay::Log("ShowConfigDialog: hInst=%p, hParent=%p", (void*)hInst, (void*)hParent);
+    INT_PTR result = DialogBox(hInst, MAKEINTRESOURCE(IDD_CONFIG), hParent, DlgProc);
+    SubtitleOverlay::Log("ShowConfigDialog: DialogBox returned %lld, err=%lu", (long long)result, GetLastError());
 }

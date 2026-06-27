@@ -10,11 +10,14 @@
 class SubtitleOverlay {
 public:
     static void SetDllInstance(HINSTANCE hInst) { s_hInst = hInst; }
+    static void Log(const char* fmt, ...);
 
     void Init();
     void ShowWelcome();
     void UpdateText(const std::string& utf8Text);
     ~SubtitleOverlay();
+
+    bool IsReady() const { return m_ready; }
 
 private:
     void ThreadProc();

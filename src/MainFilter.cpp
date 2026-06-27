@@ -91,14 +91,13 @@ public:
         if (c >= 1 && pp[0]) m_pFilter = pp[0];
         return S_OK;
     }
-    STDMETHODIMP Activate(HWND hParent, LPCRECT, BOOL) override {
-        // Show modal config dialog
+    STDMETHODIMP Activate(HWND hParent, LPCRECT pRect, BOOL fModal) override {
+        // Show modal config dialog (parented to the property page area)
         ShowConfigDialog(g_hDllInst, hParent);
-        // Close the property sheet frame (works for both
-        // PropertySheet() and OleCreatePropertyFrame())
-        HWND hRoot = GetAncestor(hParent, GA_ROOT);
-        if (hRoot && hRoot != hParent)
-            EndDialog(hRoot, IDOK);
+        // Do NOT try to close the property sheet frame — it's not our window
+        // and EndDialog/DestroyWindow on it causes residual-window artifacts.
+        // The user simply closes the property sheet with its own OK/Cancel.
+        SubtitleOverlay::Log("PropPage Activate: modal dialog returned");
         return S_OK;
     }
     STDMETHODIMP Deactivate() override { return S_OK; }
@@ -170,9 +169,11 @@ AudioSubFilter::AudioSubFilter(LPUNKNOWN pUnk, HRESULT* phr)
     : CTransformFilter(NAME("Aqua Audio Sub"), pUnk, CLSID_AudioSubFilter)
 {
     (void)phr;
+    SubtitleOverlay::Log("AudioSubFilter constructor called");
     m_overlay.Init();
     m_overlay.ShowWelcome();
     m_worker = std::thread(&AudioSubFilter::ProcessingThread, this);
+    SubtitleOverlay::Log("AudioSubFilter constructor done");
 }
 
 AudioSubFilter::~AudioSubFilter() {
@@ -292,17 +293,28 @@ HRESULT AudioSubFilter::StartStreaming() {
 }
 
 void AudioSubFilter::ProcessingThread() {
-    // Accumulate ~3 seconds of audio before sending
-    DWORD bytesPerSec = 0;
+    SubtitleOverlay::Log("ProcessingThread started (tid=%lu)", (unsigned long)GetCurrentThreadId());
+
+    // Take a local snapshot of the audio format to avoid data races.
+    // Re-read periodically in case StartStreaming updates it.
+    WAVEFORMATEX localWfex = {};
+    bool localWfexValid = false;
     {
         std::lock_guard<std::mutex> lock(m_wfexMtx);
-        if (m_wfexValid) bytesPerSec = m_wfex.nAvgBytesPerSec;
+        localWfex = m_wfex;
+        localWfexValid = m_wfexValid;
     }
+
+    // Accumulate ~3 seconds of audio before sending
+    DWORD bytesPerSec = localWfexValid ? localWfex.nAvgBytesPerSec : 176400;
     if (bytesPerSec == 0) bytesPerSec = 176400; // fallback: 44100×16×2
 
     const DWORD targetBytes = bytesPerSec * 3; // 3 seconds
+    SubtitleOverlay::Log("ProcessingThread: bytesPerSec=%lu, targetBytes=%lu", bytesPerSec, targetBytes);
+
     std::vector<char> accumulator;
     accumulator.reserve(targetBytes);
+    DWORD loopCount = 0;
 
     while (m_running) {
         // Drain the queue into accumulator
@@ -315,15 +327,29 @@ void AudioSubFilter::ProcessingThread() {
             }
         }
 
+        // Re-read wfex every ~5 seconds in case format changed
+        if (++loopCount % 25 == 0) {
+            std::lock_guard<std::mutex> lock(m_wfexMtx);
+            if (m_wfexValid && !localWfexValid) {
+                localWfex = m_wfex;
+                localWfexValid = true;
+                SubtitleOverlay::Log("ProcessingThread: wfex updated, bytesPerSec=%lu", localWfex.nAvgBytesPerSec);
+            }
+        }
+
         // If we have enough audio, send it
         if (accumulator.size() >= targetBytes) {
-            std::string result = m_client.ProcessAudioChunk(accumulator, m_wfex, m_wfexValid);
+            SubtitleOverlay::Log("ProcessingThread: sending %zu bytes to API", accumulator.size());
+            // Use local copy — no shared access needed
+            std::string result = m_client.ProcessAudioChunk(accumulator, localWfex, localWfexValid);
+            SubtitleOverlay::Log("ProcessingThread: API returned %.80s", result.c_str());
             m_overlay.UpdateText(result);
             accumulator.clear();
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
+    SubtitleOverlay::Log("ProcessingThread exiting");
 }
 
 void AudioSubFilter::ShowConfig(HINSTANCE hInst, HWND hParent) {
